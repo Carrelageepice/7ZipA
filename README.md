@@ -57,7 +57,4 @@ the current upstream `DOC/License.txt` before redistributing a build.
 Upstream:
 https://github.com/ip7z/7zip
 
-## Working identity
 
-`org.openarchive.sevenzip` is a provisional application ID. Choose a permanent
-ID before publishing, because changing it later creates a different Android app.
