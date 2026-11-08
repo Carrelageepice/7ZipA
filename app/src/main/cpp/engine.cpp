@@ -974,9 +974,40 @@ static CreateResult CreateArchiveImpl(const std::string &outPath, const std::str
     if (!format) { res.error = "Format not available in this build."; return res; }
 
     std::vector<DirItem> items;
-    std::string base = rootDir;
-    while (base.size() > 1 && base.back() == '/') base.pop_back();
-    if (!WalkDir(base, "", items, res.error, 0)) return res;
+    if (!opt.sources.empty()) {
+        // Explicit files/folders (each stored under its own name).
+        std::set<std::string> seen;
+        for (const std::string &raw : opt.sources) {
+            std::string p = raw;
+            while (p.size() > 1 && p.back() == '/') p.pop_back();
+            const size_t slash = p.find_last_of('/');
+            const std::string name = slash == std::string::npos ? p : p.substr(slash + 1);
+            struct stat st;
+            if (name.empty() || lstat(p.c_str(), &st) != 0) { ++res.unreadable; continue; }
+            if (S_ISLNK(st.st_mode) || (!S_ISREG(st.st_mode) && !S_ISDIR(st.st_mode))) {
+                ++res.unreadable;
+                continue;
+            }
+            if (!seen.insert(name).second) {
+                res.error = "Two items have the same name: " + name;
+                return res;
+            }
+            DirItem it;
+            it.full = p;
+            it.rel = name;
+            it.isDir = S_ISDIR(st.st_mode);
+            it.size = it.isDir ? 0 : static_cast<uint64_t>(st.st_size);
+            it.mode = st.st_mode;
+            it.fileTime = (static_cast<UInt64>(st.st_mtime) + 11644473600ULL) * 10000000ULL +
+                          static_cast<UInt64>(st.st_mtim.tv_nsec) / 100;
+            items.push_back(it);
+            if (it.isDir && !WalkDir(it.full, it.rel, items, res.error, 1)) return res;
+        }
+    } else {
+        std::string base = rootDir;
+        while (base.size() > 1 && base.back() == '/') base.pop_back();
+        if (!WalkDir(base, "", items, res.error, 0)) return res;
+    }
     if (items.empty()) { res.error = "Nothing to archive."; return res; }
 
     CMyComPtr<IOutArchive> out;
@@ -1128,6 +1159,7 @@ CreateResult CreateArchive(const std::string &outPath, const std::string &rootDi
     };
     CreateOptions tarOpt;
     tarOpt.format = "tar";
+    tarOpt.sources = opt.sources;
     res = CreateArchiveImpl(tarPath, rootDir, tarOpt, progress ? ProgressFn(half) : nullptr, &c1);
     if (res.status != Status::Ok) return res;
     const uint32_t files = res.files, unreadable = res.unreadable;

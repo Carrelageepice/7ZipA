@@ -30,6 +30,14 @@ object ArchiveOps {
 
     private var tempReady = false
 
+    /** Makes sure the scratch folder for nested archives is set up (safe to call often). */
+    fun ensureTempReady(context: Context) {
+        if (!tempReady) {
+            prepareTempDir(context)
+            tempReady = true
+        }
+    }
+
     fun <T> withArchivePath(context: Context, uri: Uri, block: (String) -> T): T {
         val resolver = context.contentResolver
         if (!tempReady) {
@@ -169,6 +177,31 @@ object ArchiveOps {
         } finally {
             temp.deleteRecursively()
         }
+    }
+
+    /** Result of [checkSpace]. */
+    data class SpaceCheck(val ok: Boolean, val neededBytes: Long, val availableBytes: Long)
+
+    /**
+     * Rough free-space check before extracting [unpackedBytes] into [tree].
+     * Direct mode needs the size once; the normal mode stages in the cache and
+     * then copies, so it needs about twice (both usually live on the same
+     * storage). Archives that are a compressed tar (.tar.gz...) also unpack
+     * the tar once more, which is added when [nested] is true. An estimate, so
+     * the caller should warn, not forbid.
+     */
+    fun checkSpace(context: Context, unpackedBytes: Long, tree: Uri, nested: Boolean): SpaceCheck {
+        val direct = if (canUseDirectPaths()) treeToFile(tree) else null
+        val base = if (direct != null) 1L else 2L
+        val needed = unpackedBytes * (base + if (nested) 1L else 0L)
+        val dir = if (direct != null) android.os.Environment.getExternalStorageDirectory()
+        else context.cacheDir
+        val available = try {
+            android.os.StatFs(dir.absolutePath).availableBytes
+        } catch (_: Exception) {
+            Long.MAX_VALUE  // unknown: do not block
+        }
+        return SpaceCheck(available >= needed, needed, available)
     }
 
     /** True when the user has switched on "Manage all files" for this app. */

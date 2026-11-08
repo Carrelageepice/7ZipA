@@ -118,6 +118,20 @@ int main(int argc, char **argv) {
         return r.status == sz::Status::Ok ? 0 : 1;
     }
 
+    // createp <outFile> <format> <level> <path> [path...]
+    if (argc >= 6 && !strcmp(argv[1], "createp")) {
+        sz::CreateOptions o;
+        o.format = argv[3];
+        o.level = atoi(argv[4]);
+        o.baseName = "bundle";
+        for (int i = 5; i < argc; ++i) o.sources.push_back(argv[i]);
+        int calls = 0;
+        const sz::CreateResult r = sz::CreateArchive(argv[2], "", o, Progress, &calls);
+        printf("status=%s files=%u unreadable=%u err=%s\n", StatusName(r.status), r.files,
+               r.unreadable, r.error.c_str());
+        return r.status == sz::Status::Ok ? 0 : 1;
+    }
+
     fprintf(stderr, "usage: see header comment\n");
     return 2;
 }

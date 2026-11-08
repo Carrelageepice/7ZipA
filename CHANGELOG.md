@@ -1,5 +1,41 @@
 # Changelog
 
+## 0.18 (versionName 0.18.0, code 110)
+- File manager: removed the Internal storage / Downloads chips. A storage icon
+  next to the settings button now switches between internal storage, SD card
+  and USB drives (list refreshed each time you open it).
+- Selection bar: always exactly two rows of five buttons; "All" toggles to
+  "None" when everything is selected; unavailable actions are greyed out
+  instead of hidden; the count is shown in the Cancel button.
+
+## 0.17 (versionName 0.17.0, code 108)
+- README.md is now your edited version.
+- Built-in file manager, now the default page (bottom tabs: Files / Archives).
+  Browse internal storage, SD cards and Downloads; tap a folder to enter,
+  tap an archive to browse it, tap any other file to open it with an app.
+  Long-press to select: Compress (7z, ZIP, TAR.GZ, TAR.XZ, optional password),
+  Extract here, Browse, Copy, Cut / Paste, Rename, Share, Delete, New folder,
+  hidden-files toggle. Long jobs use the background service and Performance limits.
+- Needs "All files access" (Android 11+) or storage permission (Android 9-10);
+  without it the Files tab explains how to allow it and Archives still works
+  through the picker.
+- Native: archives can be created straight from a list of paths, no staging copy.
+
+## 0.16 (versionName 0.16.0, code 107)
+- Archive contents are now browsed folder by folder: tap a folder to enter it,
+  "Up" or the system Back button to go up, path shown at the top. Folders show
+  file count and total size.
+- "Extract folder" button extracts just the folder you are viewing (with its
+  path), into the saved destination.
+
+## 0.15 (versionName 0.15.0, code 106)
+- Long jobs (extract, create, test, extract selected) run under a foreground
+  service: they keep going with the screen off or the app in the background,
+  with a progress notification and a Cancel button. A result notification
+  appears if you were away. Android 13+ asks for notification permission once.
+- Jobs no longer die if the screen is recreated (rotation etc.).
+- Free-space check before extracting, with a warning dialog (Continue / Cancel).
+
 ## 0.14 (versionName 0.14.0, code 105)
 - Real Settings page (gear icon, top right; system Back returns): theme,
   Advanced options switch, performance limits, All files access, about.

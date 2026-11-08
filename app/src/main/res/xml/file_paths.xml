@@ -2,4 +2,6 @@
 <paths>
     <!-- Files opened or shared from inside an archive are unpacked here. -->
     <cache-path name="preview" path="preview/" />
+    <!-- Files opened or shared from the built-in file manager (internal storage). -->
+    <external-path name="storage" path="." />
 </paths>

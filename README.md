@@ -1,11 +1,8 @@
-# SevenZip for Android
+# 7Zip for Android
 
 An open-source Android archive manager built around the 7-Zip engine.
 
-**Status: early development scaffold.** This project currently contains an Android
-Compose UI shell and a working JNI/CMake bridge stub. It does **not** yet compress,
-extract, inspect or decrypt archives. Those operations will be added after the
-official 7-Zip source has been integrated and tested.
+AI WAS USED IN THE DEVELOPMENT OF THIS APP
 
 ## Project goals
 

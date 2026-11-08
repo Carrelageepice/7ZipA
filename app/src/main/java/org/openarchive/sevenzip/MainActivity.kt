@@ -14,6 +14,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.lazy.LazyColumn
@@ -22,6 +23,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Archive
 import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.SdCard
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -55,10 +57,29 @@ private fun SevenZipApp() {
     val scope = rememberCoroutineScope()
     var themeMode by remember { mutableStateOf(ThemePrefs.load(context)) }
     var showSettings by remember { mutableStateOf(false) }
+    var tab by remember { mutableStateOf(0) }  // 0 = Files (default), 1 = Archives
+    var fmGoTo by remember { mutableStateOf<java.io.File?>(null) }  // storage chosen in the top bar
+    var storageMenu by remember { mutableStateOf(false) }
+    var storageRoots by remember { mutableStateOf<List<StorageRoot>>(emptyList()) }
+    var spacePrompt by remember { mutableStateOf<SpacePrompt?>(null) }
+
+    // Android 13+: ask once so the job notification can be shown.
+    val askNotifications = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { }
+    fun ensureNotificationPermission() {
+        if (android.os.Build.VERSION.SDK_INT >= 33 &&
+            context.checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            askNotifications.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
     var advancedMode by remember { mutableStateOf(AppPrefs.advancedOptions(context)) }
 
     var selectedArchive by remember { mutableStateOf<Uri?>(null) }
     var selectedName by remember { mutableStateOf("No archive selected") }
+    var browsePath by remember { mutableStateOf("") }  // folder being viewed inside the archive
 
     var archiveEntries by remember {
         mutableStateOf<List<ArchiveEntry>>(emptyList())
@@ -131,26 +152,66 @@ private fun SevenZipApp() {
     }
 
     // Extracts into the chosen folder; asks for a password (and retries) when needed.
-    fun runExtraction(archive: Uri, name: String, tree: Uri, password: String?) {
+    fun runExtraction(
+        archive: Uri, name: String, tree: Uri, password: String?,
+        skipSpaceCheck: Boolean = false,
+        indices: IntArray? = null   // null = everything
+    ) {
+        if (!skipSpaceCheck) {
+            val total = if (indices == null) {
+                archiveEntries.sumOf { if (it.isDirectory) 0L else it.size }
+            } else {
+                indices.sumOf { i ->
+                    archiveEntries.getOrNull(i)?.let { if (it.isDirectory) 0L else it.size } ?: 0L
+                }
+            }
+            val nested = name.lowercase().let {
+                it.endsWith(".tar.gz") || it.endsWith(".tgz") || it.endsWith(".tar.xz") ||
+                    it.endsWith(".txz") || it.endsWith(".tar.bz2") || it.endsWith(".tbz2")
+            }
+            val space = ArchiveOps.checkSpace(context, total, tree, nested)
+            if (!space.ok) {
+                spacePrompt = SpacePrompt(
+                    needed = space.neededBytes,
+                    available = space.availableBytes,
+                    onContinue = {
+                        spacePrompt = null
+                        runExtraction(archive, name, tree, password, skipSpaceCheck = true, indices = indices)
+                    },
+                    onCancel = { spacePrompt = null }
+                )
+                return
+            }
+        }
+
         cancelFlag.set(false)
         isExtracting = true
         extractStatus = "Starting..."
+        ensureNotificationPermission()
+        JobControl.begin(context, "Extracting $name")
 
-        scope.launch {
+        // Runs in the app-wide scope so it outlives this screen being recreated.
+        AppScope.launch {
+            var jobResult = "Stopped."
             try {
                 val summary = withContext(Dispatchers.IO) {
-                    ArchiveOps.extractToTree(
-                        context, archive, name, password, tree,
-                        ExtractProgress { doneBytes, totalBytes, entryName ->
+                    val progressCb = ExtractProgress { doneBytes, totalBytes, entryName ->
                             extractStatus = if (totalBytes > 0) {
                                 "Extracting ${formatFileSize(doneBytes)} / " +
                                     "${formatFileSize(totalBytes)}  $entryName"
                             } else {
                                 "Extracting  $entryName"
                             }
-                            !cancelFlag.get()
+                            JobControl.progress(context, doneBytes, totalBytes, entryName)
+                            !cancelFlag.get() && !JobControl.cancelled
                         }
-                    )
+                    if (indices == null) {
+                        ArchiveOps.extractToTree(context, archive, name, password, tree, progressCb)
+                    } else {
+                        ArchiveOps.extractSelectedToTree(
+                            context, archive, name, password, indices, tree, progressCb
+                        )
+                    }
                 }
                 archivePassword = password
                 extractStatus = when {
@@ -165,6 +226,7 @@ private fun SevenZipApp() {
                         parts.joinToString(", ") + "."
                     }
                 }
+                jobResult = extractStatus ?: "Done."
             } catch (e: ArchiveException) {
                 if (e is PasswordRequiredException || e is WrongPasswordException) {
                     extractStatus = null
@@ -191,6 +253,7 @@ private fun SevenZipApp() {
                 extractStatus = "Error: " + (e.message ?: "extraction failed.")
             } finally {
                 isExtracting = false
+                JobControl.end(context, jobResult)
             }
         }
     }
@@ -210,8 +273,11 @@ private fun SevenZipApp() {
         isCreating = true
         createStatus = "Preparing files..."
         lastCreated = null
+        ensureNotificationPermission()
+        JobControl.begin(context, "Creating $name")
 
-        scope.launch {
+        AppScope.launch {
+            var jobResult = "Stopped."
             try {
                 val (summary, createdUri) = withContext(Dispatchers.IO) {
                     ArchiveOps.createToTreeEx(
@@ -223,7 +289,8 @@ private fun SevenZipApp() {
                             } else {
                                 "Compressing  $entryName"
                             }
-                            !createCancel.get()
+                            JobControl.progress(context, doneBytes, totalBytes, entryName)
+                            !createCancel.get() && !JobControl.cancelled
                         },
                         options
                     )
@@ -240,6 +307,7 @@ private fun SevenZipApp() {
                     "Done: ${ArchiveOps.safeName(name)}.${ArchiveOps.extensionFor(format)} " +
                         "created (${summary.files} files) in ${treeLabel(tree)}."
                 }
+                jobResult = createStatus ?: "Done."
             } catch (e: SecurityException) {
                 destinationTree = null
                 saveTree(context, null)
@@ -249,6 +317,7 @@ private fun SevenZipApp() {
                 createStatus = "Error: " + (e.message ?: "creating the archive failed.")
             } finally {
                 isCreating = false
+                JobControl.end(context, jobResult)
             }
         }
     }
@@ -259,6 +328,7 @@ private fun SevenZipApp() {
         selectedName = name
 
         archiveEntries = emptyList()
+        browsePath = ""
         errorMessage = null
         extractStatus = null
         archivePassword = null
@@ -276,7 +346,10 @@ private fun SevenZipApp() {
     // Archive handed over by "Open with" / "Share" from another app.
     LaunchedEffect(Unit) {
         val incoming = IncomingArchives.from(context, (context as? android.app.Activity)?.intent)
-        if (incoming != null) openArchiveUri(incoming.uri, incoming.name)
+        if (incoming != null) {
+            openArchiveUri(incoming.uri, incoming.name)
+            tab = 1  // show the archive, not the file manager
+        }
     }
 
     val pickFolder = rememberLauncherForActivityResult(
@@ -337,7 +410,12 @@ private fun SevenZipApp() {
 
     AppTheme(themeMode) {
         passwordPrompt?.let { PasswordDialog(it) }
+        spacePrompt?.let { SpaceDialog(it) }
         BackHandler(enabled = showSettings) { showSettings = false }
+        // Back goes up one folder while browsing inside an archive.
+        BackHandler(enabled = !showSettings && tab == 1 && browsePath.isNotEmpty()) {
+            browsePath = ArchiveBrowser.parentOf(browsePath)
+        }
 
         if (showSettings) SettingsScreen(
             themeMode = themeMode,
@@ -349,6 +427,22 @@ private fun SevenZipApp() {
             onAdvancedChange = { advancedMode = it },
             onBack = { showSettings = false }
         ) else Scaffold(
+            bottomBar = {
+                NavigationBar {
+                    NavigationBarItem(
+                        selected = tab == 0,
+                        onClick = { tab = 0 },
+                        icon = { Icon(Icons.Default.Folder, contentDescription = null) },
+                        label = { Text("Files") }
+                    )
+                    NavigationBarItem(
+                        selected = tab == 1,
+                        onClick = { tab = 1 },
+                        icon = { Icon(Icons.Default.Archive, contentDescription = null) },
+                        label = { Text("Archives") }
+                    )
+                }
+            },
             topBar = {
                 TopAppBar(
                     title = {
@@ -365,6 +459,33 @@ private fun SevenZipApp() {
                         }
                     },
                     actions = {
+                        if (tab == 0) {
+                            Box {
+                                IconButton(onClick = {
+                                    storageRoots = FileOps.roots(context)  // re-read: a USB drive may have been plugged in
+                                    storageMenu = true
+                                }) {
+                                    Icon(
+                                        imageVector = Icons.Default.SdCard,
+                                        contentDescription = "Switch storage"
+                                    )
+                                }
+                                DropdownMenu(
+                                    expanded = storageMenu,
+                                    onDismissRequest = { storageMenu = false }
+                                ) {
+                                    storageRoots.forEach { r ->
+                                        DropdownMenuItem(
+                                            text = { Text(r.label) },
+                                            onClick = {
+                                                storageMenu = false
+                                                fmGoTo = r.dir
+                                            }
+                                        )
+                                    }
+                                }
+                            }
+                        }
                         IconButton(onClick = { showSettings = true }) {
                             Icon(
                                 imageVector = Icons.Default.Settings,
@@ -376,7 +497,15 @@ private fun SevenZipApp() {
             }
         ) { padding ->
 
-            LazyColumn(
+            if (tab == 0) FileManagerPane(
+                modifier = Modifier.padding(padding),
+                goTo = fmGoTo,
+                onGoToHandled = { fmGoTo = null },
+                onOpenArchive = { file ->
+                    openArchiveUri(Uri.fromFile(file), file.name)
+                    tab = 1
+                }
+            ) else LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(padding)
@@ -588,15 +717,78 @@ private fun SevenZipApp() {
                             )
                         }
                     } else {
-                        items(archiveEntries) { entry ->
+                        val children = ArchiveBrowser.childrenOf(archiveEntries, browsePath)
+
+                        item {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    "/" + browsePath,
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f)
+                                )
+                                if (browsePath.isNotEmpty()) {
+                                    TextButton(
+                                        onClick = { browsePath = ArchiveBrowser.parentOf(browsePath) }
+                                    ) { Text("Up") }
+                                    TextButton(
+                                        enabled = !isExtracting,
+                                        onClick = {
+                                            val dest = destinationTree
+                                            val archive = selectedArchive
+                                            if (dest == null || archive == null) {
+                                                extractStatus = "Pick a destination folder first " +
+                                                    "(use \"Extract all\" once to choose it)."
+                                            } else {
+                                                val prefix = browsePath
+                                                val ids = archiveEntries.withIndex()
+                                                    .filter {
+                                                        it.value.name.replace('\\', '/')
+                                                            .trimStart('/').startsWith(prefix)
+                                                    }
+                                                    .map { it.index }
+                                                    .toIntArray()
+                                                runExtraction(
+                                                    archive, selectedName, dest, archivePassword,
+                                                    indices = ids
+                                                )
+                                            }
+                                        }
+                                    ) { Text("Extract folder") }
+                                }
+                            }
+                            HorizontalDivider()
+                        }
+
+                        if (children.isEmpty()) {
+                            item {
+                                Text(
+                                    "This folder is empty.",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        items(children) { entry ->
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .then(
+                                        if (entry.isDir) {
+                                            Modifier.clickable { browsePath = entry.path }
+                                        } else {
+                                            Modifier
+                                        }
+                                    )
                                     .padding(vertical = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Icon(
-                                    imageVector = if (entry.isDirectory) {
+                                    imageVector = if (entry.isDir) {
                                         Icons.Default.Folder
                                     } else {
                                         Icons.Default.InsertDriveFile
@@ -615,14 +807,15 @@ private fun SevenZipApp() {
                                         style = MaterialTheme.typography.bodyMedium
                                     )
 
-                                    if (!entry.isDirectory) {
-                                        Text(
-                                            formatFileSize(entry.size) +
-                                                if (entry.encrypted) "  ·  encrypted" else "",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
+                                    Text(
+                                        (if (entry.isDir) {
+                                            "${entry.fileCount} files  ·  " + formatFileSize(entry.size)
+                                        } else {
+                                            formatFileSize(entry.size)
+                                        }) + if (entry.encrypted) "  ·  encrypted" else "",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
                                 }
                             }
 
@@ -906,7 +1099,7 @@ private fun SevenZipApp() {
 
                 item {
                     Text(
-                        "Development build · Rev 0.14 · WIP",
+                        "Development build · Rev 0.18 · WIP",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(bottom = 24.dp)
@@ -1046,3 +1239,33 @@ private fun treeLabel(tree: Uri): String =
     } catch (_: Exception) {
         "the selected folder"
     }
+
+/** Process-wide scope for long jobs, so they survive the screen being recreated. */
+private val AppScope = kotlinx.coroutines.CoroutineScope(
+    kotlinx.coroutines.SupervisorJob() + Dispatchers.Main
+)
+
+private class SpacePrompt(
+    val needed: Long,
+    val available: Long,
+    val onContinue: () -> Unit,
+    val onCancel: () -> Unit
+)
+
+@Composable
+private fun SpaceDialog(prompt: SpacePrompt) {
+    AlertDialog(
+        onDismissRequest = prompt.onCancel,
+        title = { Text("Low on storage space") },
+        text = {
+            Text(
+                "Extracting this archive may need about ${formatFileSize(prompt.needed)} " +
+                    "of free space, but only ${formatFileSize(prompt.available)} is available. " +
+                    "If you turn on \"Manage all files\" in Settings, extraction needs only " +
+                    "half as much. Continue anyway?"
+            )
+        },
+        confirmButton = { TextButton(onClick = prompt.onContinue) { Text("Continue") } },
+        dismissButton = { TextButton(onClick = prompt.onCancel) { Text("Cancel") } }
+    )
+}

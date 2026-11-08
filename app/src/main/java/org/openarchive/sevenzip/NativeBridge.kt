@@ -172,6 +172,28 @@ object NativeBridge {
         return CreateSummary(r[0], r[1] != 0)
     }
 
+    /** Creates an archive from exactly these files/folders (absolute paths), each stored under its own name. */
+    fun createArchiveFromPaths(
+        outputPath: String,
+        sources: List<String>,
+        format: String,
+        level: Int,
+        password: String?,
+        encryptNames: Boolean,
+        options: CompressionOptions,
+        progress: ExtractProgress?
+    ): CreateSummary {
+        check(loaded) { "The native 7-Zip engine is unavailable." }
+        val r = mapErrors {
+            nativeCreateArchiveFromPaths(
+                outputPath, sources.toTypedArray(), format, level, password, encryptNames,
+                options.method.ifEmpty { null }, options.solid, options.dictMb,
+                options.threads, options.baseName.ifEmpty { null }, progress
+            )
+        }
+        return CreateSummary(r[0], r[1] != 0)
+    }
+
     private inline fun <T> mapErrors(block: () -> T): T {
         try {
             return block()
@@ -234,6 +256,21 @@ object NativeBridge {
     private external fun nativeCreateArchiveEx(
         outputPath: String,
         rootDir: String,
+        format: String,
+        level: Int,
+        password: String?,
+        encryptNames: Boolean,
+        method: String?,
+        solid: Int,
+        dictMb: Int,
+        threads: Int,
+        baseName: String?,
+        progress: ExtractProgress?
+    ): IntArray
+
+    private external fun nativeCreateArchiveFromPaths(
+        outputPath: String,
+        sources: Array<String>,
         format: String,
         level: Int,
         password: String?,

@@ -12,8 +12,8 @@ android {
         applicationId = "org.openarchive.sevenzip"
         minSdk = 26
         targetSdk = 36
-        versionCode = 105
-        versionName = "0.14.0"
+        versionCode = 110
+        versionName = "0.18.0"
 
         ndk {
             abiFilters += listOf("arm64-v8a")

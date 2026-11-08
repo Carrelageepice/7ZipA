@@ -62,9 +62,10 @@ fun ArchiveToolsCard(
     var progress by remember { mutableStateOf(0f) }
     var message by remember(archive) { mutableStateOf("") }
 
-    fun progressCallback() = ExtractProgress { done, total, _ ->
+    fun progressCallback() = ExtractProgress { done, total, name ->
         if (total > 0) progress = (done.toFloat() / total.toFloat()).coerceIn(0f, 1f)
-        !cancel
+        JobControl.progress(context, done, total, name)
+        !cancel && !JobControl.cancelled
     }
 
     // Runs [work] off the main thread with a shared busy/progress/error wrapper.
@@ -74,8 +75,9 @@ fun ArchiveToolsCard(
         cancel = false
         progress = 0f
         message = ""
+        JobControl.begin(context, "Archive tools: $archiveName")
         scope.launch {
-            message = try {
+            val result = try {
                 withContext(Dispatchers.IO) { work() }
             } catch (e: PasswordRequiredException) {
                 "This archive needs a password. Enter it and try again."
@@ -83,9 +85,10 @@ fun ArchiveToolsCard(
                 "Wrong password."
             } catch (e: Exception) {
                 e.message ?: "Something went wrong."
-            } finally {
-                busy = false
             }
+            busy = false
+            message = result
+            JobControl.end(context, result)
         }
     }
 

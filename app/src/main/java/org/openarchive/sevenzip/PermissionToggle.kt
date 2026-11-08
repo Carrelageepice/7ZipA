@@ -32,7 +32,7 @@ import androidx.compose.ui.platform.LocalContext
  * Shows nothing on Android 10 and older, where the permission does not exist.
  */
 @Composable
-fun AllFilesAccessToggle(modifier: Modifier = Modifier) {
+fun AllFilesAccessToggle(modifier: Modifier = Modifier, onChanged: (Boolean) -> Unit = {}) {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return
 
     val context = LocalContext.current
@@ -42,6 +42,7 @@ fun AllFilesAccessToggle(modifier: Modifier = Modifier) {
         ActivityResultContracts.StartActivityForResult()
     ) {
         granted = Environment.isExternalStorageManager()
+        onChanged(granted)
     }
 
     Row(

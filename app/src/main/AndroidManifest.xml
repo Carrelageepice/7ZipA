@@ -4,11 +4,19 @@
          folder picker. Note: Google Play restricts this permission. -->
     <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" />
 
+    <!-- Android 9 and 10 use the classic storage permissions for the file manager. -->
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="29" />
+
+    <!-- Keeps long jobs alive in the background and shows their progress. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
     <application
-        android:icon="@mipmap/ic_launcher"
-        android:roundIcon="@mipmap/ic_launcher_round"
+        android:requestLegacyExternalStorage="true"
         android:allowBackup="true"
-        android:label="7Zip"
+        android:label="SevenZip"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
         <activity
@@ -67,6 +75,11 @@
                 <data android:mimeType="application/gzip" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name=".JobService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
 
         <!-- Lets other apps read files this app unpacks for "Open" / "Share". -->
         <provider

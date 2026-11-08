@@ -20,7 +20,11 @@ object EntryTools {
 
     /** Opens [file] in whatever app handles it. Returns false if none does. */
     fun open(context: Context, file: File): Boolean {
-        val uri = FileProvider.getUriForFile(context, authority(context), file)
+        val uri = try {
+            FileProvider.getUriForFile(context, authority(context), file)
+        } catch (_: IllegalArgumentException) {
+            return false  // location not covered by file_paths.xml (e.g. an SD card)
+        }
         val intent = Intent(Intent.ACTION_VIEW)
             .setDataAndType(uri, mimeFor(file.name))
             .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -29,7 +33,11 @@ object EntryTools {
 
     /** Offers [file] to the share sheet. */
     fun share(context: Context, file: File): Boolean {
-        val uri = FileProvider.getUriForFile(context, authority(context), file)
+        val uri = try {
+            FileProvider.getUriForFile(context, authority(context), file)
+        } catch (_: IllegalArgumentException) {
+            return false
+        }
         val intent = Intent(Intent.ACTION_SEND)
             .setType(mimeFor(file.name))
             .putExtra(Intent.EXTRA_STREAM, uri)

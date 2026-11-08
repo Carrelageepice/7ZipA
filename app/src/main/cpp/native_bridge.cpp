@@ -462,3 +462,56 @@ Java_org_openarchive_sevenzip_NativeBridge_nativeCreateArchiveEx(
     env->SetIntArrayRegion(result, 0, 2, values);
     return result;
 }
+
+// Creates an archive from an explicit list of files/folders (absolute paths),
+// each stored under its own name. Returns [files, cancelled].
+extern "C"
+JNIEXPORT jintArray JNICALL
+Java_org_openarchive_sevenzip_NativeBridge_nativeCreateArchiveFromPaths(
+        JNIEnv *env, jobject, jstring outputPath, jobjectArray sources, jstring format,
+        jint level, jstring password, jboolean encryptNames, jstring method, jint solid,
+        jint dictMb, jint threads, jstring baseName, jobject progress) {
+
+    if (outputPath == nullptr || sources == nullptr || format == nullptr) {
+        ThrowIOException(env, "Output path, sources or format is missing.");
+        return nullptr;
+    }
+    ProgressBridge bridge(env, progress);
+    if (!bridge.ok()) { bridge.Finish(env); return nullptr; }
+
+    const std::string out = ToUtf8(env, outputPath);
+    std::string pw;
+    sz::CreateOptions opt;
+    opt.format = ToUtf8(env, format);
+    opt.level = static_cast<int>(level);
+    opt.encryptNames = encryptNames == JNI_TRUE;
+    if (password != nullptr) { pw = ToUtf8(env, password); opt.password = &pw; }
+    if (method != nullptr) opt.method = ToUtf8(env, method);
+    opt.solid = static_cast<int>(solid);
+    opt.dictMb = static_cast<int>(dictMb);
+    opt.threads = static_cast<int>(threads);
+    if (baseName != nullptr) opt.baseName = ToUtf8(env, baseName);
+
+    const jsize n = env->GetArrayLength(sources);
+    for (jsize i = 0; i < n; ++i) {
+        jstring s = static_cast<jstring>(env->GetObjectArrayElement(sources, i));
+        if (s == nullptr) continue;
+        opt.sources.push_back(ToUtf8(env, s));
+        env->DeleteLocalRef(s);
+    }
+
+    const sz::CreateResult res =
+            sz::CreateArchive(out, std::string(), opt, ProgressBridge::Callback, &bridge);
+
+    if (bridge.Finish(env)) return nullptr;
+    if (res.status != sz::Status::Ok && res.status != sz::Status::Cancelled) {
+        ThrowForStatus(env, res.status, res.error);
+        return nullptr;
+    }
+    jintArray result = env->NewIntArray(2);
+    if (result == nullptr) return nullptr;
+    const jint values[2] = {static_cast<jint>(res.files),
+                            res.status == sz::Status::Cancelled ? 1 : 0};
+    env->SetIntArrayRegion(result, 0, 2, values);
+    return result;
+}

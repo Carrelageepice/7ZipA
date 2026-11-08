@@ -86,6 +86,7 @@ struct CreateOptions {
     int dictMb = 0;                      // 7z: dictionary size in MB
     int threads = 0;                     // 0 = automatic
     std::string baseName;                // name of the .tar inside tar.gz/xz/bz2
+    std::vector<std::string> sources;    // if set: archive exactly these paths (rootDir ignored)
 };
 
 struct CreateResult {
